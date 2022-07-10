@@ -1,0 +1,462 @@
+---
+title: "Sample Project from Roux Institute Coursework - Seattle Public Library Data"
+author: "Thomas Matthews (as well as consulting with group members)"
+date: "3/3/2022"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    theme: lumen
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Introduction
+
+The data used in this project is from the Seattle Public Library (SPL) and ranges from 2017 to 2021. The sample data provided to our group has already been samples from the whole, which can be found [here](https://data.seattle.gov/Community/Checkouts-By-Title-Physical-Items-/5src-czff). The portion roughly comprises 2% of the total, and was sampled with care to preserve the distribution across variables as best as possible. The data is divided into two parts, monthly checkouts which has 209,492 observation on 11 variables and daily checkouts with 410,947 observations on 10 varibales. For the monthly data frame, the variables are: 
+
+* **UsageClass:** Either physical or digital to decribe the form of the item.  
+* **CheckoutType:** The type/method by which the item was checked out. 
+* **MaterialType:** The type/material of item (Book, e-Book, song, etc.)
+* **Title:** Item's title. 
+* **Creator:** Item's creator (Author, director, artist, etc.)
+* **Subjects:** Describes the subject or genre of the item (African American business, Medieval Folklore, etc.).
+* **Publisher:** The item's publisher/production company.
+* **PublicationYear:** Year (or estimated year) of publication. 
+* **CheckoutYear:** Year the item was checked out (2017 - 2021)
+* **CheckoutMonth:** Month (1 - 12) of checkout. 
+* **Checkouts:** Number of total checkouts for the item in the month. 
+
+For the daily data, the 10 variables are: 
+
+* **CheckoutDay:** Day of the week item was checked out (Monday, Tuesday, etc.).
+* **ItemType:** Code describing the format/medium/classification of the item.
+* **Collection:** Code describing the format/medium/classification of the collection in which the item is found.
+* **ItemTitle:** Item's title. 
+* **Subjects:** Describes the subject or genre of the item (African American business, Medieval Folklore, etc.).
+* **CheckoutDateTime:** String giving the exact date and time, e.g., "10/08/2017 01:51:00 PM".
+* **X:** *Currently unknown, some sort of index which is apparently irrelevant for this purpose.*
+* **ID:** ID of the row of data.
+* **CheckoutYear:** Year the item was checked out (2017 - 2021)
+* **CheckoutMonth:** Month (1 - 12) of checkout. 
+
+## Project Overview
+
+The overall aim of the project is to use this data, which includes information pre and post COVID, to help predict what sort of demand or trends the library system might expect going forward as COVID restrictions rise and fall over the coming years and months. There are many avenues to explore, and so the following is a brief dive into the data to try and isolate it for use in creating effective data visualizations which, hypothetically, would be given to report on the data. Our group was most intrigued by the idea of using the data to try and predict subject matter changes. Changes in format are certain, but it would be useful to see what genre's and types of materials people are checking out of the library to attempt to inform demand in the future. Therefore, the audience of this report would most certainly be publishers, and they would have to be large enough to be able to use this data effectively, so only a select few of the largest publishers (Penguin, Macmillan, etc.). To this end, much of the EDA relies on intuition and interest, and are catered to certain questions which we suppose a publisher might want to have answered, such as: 
+
+1. Did checkouts in subject matter shift in accordance with the social trends that also occurred? For example, were there more self-help, cooking, exercise, etc. titles checked out?
+
+2. During the pandemic, there was a much larger focus in the general population on public health, diseases, and more from the virus itself and from mental and physical effects of being in isolation. Was there an increase in these types of books from people trying to learn more? 
+
+3. Food was a large focus during the pandemic, as more people were cooking from home. Was there an increase in food/cooking related titles from the library? 
+
+Our goal is to provide visualizations to present this information, whatever the result, to publishers. 
+
+# Cleaning & Examination
+
+## Summary Statistics & Formatting
+
+ 
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+#First set my options and load libraries.
+options(stringsAsFactors = FALSE)
+options(dplyr.summarise.inform = FALSE)
+
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(JointAI)
+library(BSDA)
+library(zoo)
+library(ggpubr)
+library(DT)
+library(knitr)
+```
+
+
+```{r echo=FALSE}
+# Load in the data. 
+mdf <- read.csv("../data/SPL Data for ALY6070/groupSample_monthlyCheckouts_5.csv")
+ddf <- read.csv("../data/SPL Data for ALY6070/groupSample_dailyCheckouts_5.csv")
+```
+
+After setting options and loading in the libraries and the data, we can begin with some summary statistics. We can see that there are many, many variations on the title, creator, and publisher, which are to be expected. However, of more interest is the variation in subjects and publication year. For subject, taking a look at the data itself shows that there are many specific categories for subject, and they are not simply limited to "mystery" or "fiction" which explains the variation. For publication year, not all are exactly known, and thus there are a series of coded formats depending on the guess. These formats can be seen in the documentation for the original data in the link above.
+
+**Summary statistics for monthly data:**
+```{r}
+skim(mdf)
+```
+**Summary statistics for daily:**
+```{r}
+skim(ddf)
+```
+The data shows no missing values, however, there are certain empty values in the form of blank strings. I want to convert those to 'NA' values to better account for them in the data. 
+```{r}
+mdf <- mdf %>%
+  mutate_all(na_if,"")
+
+ddf <- ddf %>%
+  mutate_all(na_if,"")
+```
+
+Sorting through material type, 99% of the data is in 7 of the 35 categories, so for this analysis I will focus on those, as the assumption is publishers would fine the most broad areas to focus on, and internally manage selecting exactly what strategies to use in picking new titles to publish. Essentially, this information would be most useful to form a large scale strategy, and so we choose to examine the formats with the most data. Additionally, we want to be able to tell if the item was checked out during or before COVID, so we can create a new column to indicate this. At the same time, we can convert the dates and times, read in as strings, to more usable formats for coding purposes. See the full .Rmd file for those changes in more detail. 
+```{r}
+mdf %>%
+  group_by(MaterialType) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count)) %>%
+  mutate(Frequency = round(Count / sum(Count),2)) %>%
+  mutate(Cumulative_Frequency = round(cumsum(Count)/nrow(mdf),2))
+```
+
+```{r, }
+# Select only certain material types
+formats <- c("BOOK", "EBOOK","AUDIOBOOK","VIDEODISC","SOUNDDISC","SONG","MUSIC")
+
+mdf <- mdf %>% filter((mdf$MaterialType %in% formats) == TRUE)
+
+# Convert the dates and times. 
+ddf <- separate(ddf, CheckoutDateTime, into = c("CheckoutDate","CheckoutTime"), sep = " ", extra = "merge")
+
+ddf$CheckoutDate <- mdy(ddf$CheckoutDate)
+
+ddf$CheckoutTime <- parse_time(ddf$CheckoutTime, '%I:%M:%S %p')
+
+ddf$CheckoutMonth <- as.numeric(format(ddf$CheckoutDate, "%m"))
+
+#Make a COVID_ID tag for use in visuals and analysis.
+covid <- rep("Before", nrow(mdf))
+covid[(which(mdf$CheckoutMonth >= 3 & mdf$CheckoutYear >= 2020))] <- "During"
+covid[(which(mdf$CheckoutYear >= 2021))] <- "During"
+
+mdf$COVID_ID <- as.factor(covid)
+
+covid <- rep("Before", nrow(ddf))
+covid[which(ddf$CheckoutDate > as.Date("2020-03-12"))] <- "During"
+
+ddf$COVID_ID <- as.factor(covid)
+```
+
+We note that there is some information about format in the daily data set, but it is not the same as the monthly in that it is contain in the "ItemType" codes. The wording does not match perfectly, but using the given dictionary with which we can interpret the codes, we can do our best to filter to have the same data types. The result is removing 3,006 of the 410,947 points, or 0.7% of the data, which roughly matches the proportion we kept from the monthly data. 
+```{r}
+dict <- read.csv("../data/SPL Data for ALY6070/Integrated_Library_System__ILS__Data_Dictionary.csv")
+formats <- c("BOOK", "EBOOK","AUDIOBOOK","VIDEODISC","SOUNDDISC","SONG","MUSIC")
+
+keeps <- c("Book","Audiobook Disc","Audiobook Tape","Video Disc","Audio Disc")
+
+
+dict %>%
+  filter(Format.Subgroup %in% keeps) %>%
+  pull("Code") -> codes
+
+ddf <- ddf %>%
+  filter(ItemType %in% codes)
+```
+
+
+
+
+## Missing Data
+
+
+
+
+There is a significant amount of missing data in both files, and we need to evaluate where the data is missing, and what is the distribution or type of missing data. It could be one of three different options, which are MCAR (missing completely at Random), MAR (missing at random), or NMAR (not missing at random)
+
+
+$$\underline{\text{Figure 1}}$$
+
+```{r, fig.cap={"Figure 1: Visualizing the missing data from the monthly data frame."}}
+md_pattern(mdf, color = c('#34111b', '#e30f41'))
+```
+From figure 1 we can see that the distribution of missing data is limited to four variables, Publisher, PublicationYear, Subjects, and Creator. Of these, it seems creator has by the most missing, about 11.3% of the data, while the other three represent much less, although they are missing enough to be noticeable and wary. 
+
+$$\underline{\text{Figure 2}}$$
+```{r, fig.cap={"Figure 2: Visualizing the missing data from the daily data frame."}}
+md_pattern(ddf, color = c('#34111b', '#e30f41'))
+```
+
+Figure 2 shows that there is less missing data in the daily values, most of which is in Subjects which represents a smaller fraction of the data, about 0.4%. Overall, the missing data can be left in as the NA datatype. Since there is no way to interpolate the missing categorical data, should it become a factor in future analysis it can be filtered out then. 
+
+
+## Grouping by Subject
+
+To answer our questions about which subjects saw an increase in popularity once COVID isolation began, we first need to clean and sort the data by unique subjects, as the raw data lists several categories for each title. Doing this for each data set, and combining them, the average checkouts per months can be calculated for subjects before and during COVID. To provide some interpret-able results, I make the choice to filter only the subjects which had at least 5 checkouts both before COVID and during. Additionally, using the number of samples and standard deviation, we can perform hypothesis tests on the difference under the null hypothesis that the mean checkouts per month for each subject before COVID is greater than or equal to the mean during COVID. This is shown in table 1 below. 
+
+$$ \underline{\text{Table 1}} $$
+
+```{r}
+t1 <- ddf %>%
+  filter(!is.na(Subjects)) %>%
+  group_by(Subjects, CheckoutMonth, CheckoutYear) %>%
+  mutate(Checkouts = n()) %>%
+  select("Subjects", "CheckoutMonth", "CheckoutYear","Checkouts") %>%
+  separate_rows(Subjects, sep = ", ")
+  
+t2 <- mdf %>%
+  filter(!is.na(Subjects)) %>%
+  select("Subjects", "CheckoutMonth", "CheckoutYear","Checkouts") %>%
+  separate_rows(Subjects, sep = ", ")
+
+subs <- rbind(t1,t2)
+
+subs <- subs %>% 
+  group_by(Subjects, CheckoutMonth, CheckoutYear) %>% 
+  transmute(Checkouts = sum(Checkouts))
+
+covid <- rep("Before", nrow(subs))
+covid[(which(subs$CheckoutMonth >= 3 & subs$CheckoutYear >= 2020))] <- "During"
+covid[(which(subs$CheckoutYear >= 2021))] <- "During"
+
+subs$COVID_ID <- as.factor(covid)
+
+subs_raw <- subs
+
+subs <- subs %>%
+  group_by(Subjects) %>%
+  summarise(CPM_Before_COVID = round(mean(Checkouts[COVID_ID=="Before"]),3), n1 = length(which(COVID_ID=="Before")), 
+            sd1 = round(sd(Checkouts[COVID_ID=="Before"]),3), Total_Before = sum(Checkouts[COVID_ID=="Before"]), 
+            CPM_During_COVID = round(mean(Checkouts[COVID_ID=="During"]),3), n2 = length(which(COVID_ID=="During")), 
+            sd2 = round(sd(Checkouts[COVID_ID=="During"]), 3), Total_During = sum(Checkouts[COVID_ID == "During"])) %>% 
+  filter(n1 > 5,n2 > 5) %>%
+  mutate(diff = CPM_During_COVID - CPM_Before_COVID, Total = Total_Before + Total_During)
+
+tests <- numeric(nrow(subs))
+
+for (i in 1:nrow(subs)) {
+  tests[i] <- tsum.test(mean.x = subs$CPM_Before_COVID[i], s.x = subs$sd1[i], n.x = subs$n1[i], mean.y = subs$CPM_During_COVID[i], s.y = subs$sd2[i], n.y = subs$n2[i], alternative = "two.sided")$p.value
+}
+subs$P.value <- tests
+
+subs <- subs %>%
+  filter(P.value < 0.05)
+
+write.csv(subs, "/Users/thomasmatthews/ALY 6070/data/all_subjects.csv")
+
+datatable(subs,
+          filter = 'top', options = list(
+            pageLength = 10, autoWidth = TRUE
+          ))
+```
+
+The file above was saved to a CSV. However, we might also want to look at only the most popular subjects, so we can create another data.frame for this. Looking at the data above, several of the most popular formats were movies or films, and given that we are combining daily and monthly data, and the daily only accounts for physical checkouts, it follow to limit this selection to only books, audio books, or e-books. 
+
+```{r}
+# Filter only some material types. 
+formats <- c("BOOK", "EBOOK","AUDIOBOOK")
+keeps <- c("Book","Audiobook Disc","Audiobook Tape")
+
+dict %>%
+  filter(Format.Subgroup %in% keeps) %>%
+  pull("Code") -> codes
+
+ddf_reduced <- ddf %>%
+  filter(ItemType %in% codes)
+
+mdf_reduced <- mdf %>% filter((mdf$MaterialType %in% formats) == TRUE)
+
+# Calculate data.frame
+t3 <- ddf_reduced %>%
+  filter(!is.na(Subjects)) %>%
+  group_by(Subjects, CheckoutMonth, CheckoutYear) %>%
+  mutate(Checkouts = n()) %>%
+  select("Subjects", "CheckoutMonth", "CheckoutYear","Checkouts") %>%
+  separate_rows(Subjects, sep = ", ")
+  
+t4 <- mdf_reduced %>%
+  filter(!is.na(Subjects)) %>%
+  select("Subjects", "CheckoutMonth", "CheckoutYear","Checkouts") %>%
+  separate_rows(Subjects, sep = ", ")
+
+subs_reduced <- rbind(t3,t4)
+
+
+subs_reduced <- subs_reduced %>% 
+  group_by(Subjects, CheckoutMonth, CheckoutYear) %>% 
+  transmute(Checkouts = sum(Checkouts))
+
+covid <- rep("Before", nrow(subs_reduced))
+covid[(which(subs_reduced$CheckoutMonth >= 3 & subs_reduced$CheckoutYear >= 2020))] <- "During"
+covid[(which(subs_reduced$CheckoutYear >= 2021))] <- "During"
+
+subs_reduced$COVID_ID <- as.factor(covid)
+
+subs_reduced <- subs_reduced %>%
+  group_by(Subjects) %>%
+  summarise(CPM_Before_COVID = round(mean(Checkouts[COVID_ID=="Before"]),3), n1 = length(which(COVID_ID=="Before")), 
+            sd1 = round(sd(Checkouts[COVID_ID=="Before"]),3), Total_Before = sum(Checkouts[COVID_ID=="Before"]), 
+            CPM_During_COVID = round(mean(Checkouts[COVID_ID=="During"]),3), n2 = length(which(COVID_ID=="During")), 
+            sd2 = round(sd(Checkouts[COVID_ID=="During"]), 3), Total_During = sum(Checkouts[COVID_ID == "During"])) %>% 
+  filter(n1 > 5,n2 > 5) %>%
+  mutate(diff = CPM_During_COVID - CPM_Before_COVID, Total = Total_Before + Total_During)
+
+tests <- numeric(nrow(subs_reduced))
+
+for (i in 1:nrow(subs_reduced)) {
+  tests[i] <- tsum.test(mean.x = subs_reduced$CPM_Before_COVID[i], s.x = subs_reduced$sd1[i], n.x = subs_reduced$n1[i], mean.y = subs_reduced$CPM_During_COVID[i], s.y = subs_reduced$sd2[i], n.y = subs_reduced$n2[i], alternative = "two.sided")$p.value
+}
+subs_reduced$P.value <- tests
+
+subs_top30 <- subs_reduced %>%
+         filter(rank(desc(Total))<=30)
+
+write.csv(subs_top30, "/Users/thomasmatthews/ALY 6070/data/subs_top30.csv")
+```
+
+```{r}
+# We may also want to have a less calculated, raw version of this data. 
+subs_1 <- subs_raw %>%
+  filter(COVID_ID == "Before") %>%
+  group_by(Subjects) %>%
+  mutate(CPM = round(mean(Checkouts),3), n = n(), 
+            sd = round(sd(Checkouts),3), Total = sum(Checkouts)) %>%
+  filter(n>5)
+
+subs_2 <- subs_raw %>%
+  filter(COVID_ID == "During") %>%
+  group_by(Subjects) %>%
+  mutate(CPM = round(mean(Checkouts),3), n = n(), 
+            sd = round(sd(Checkouts),3), Total = sum(Checkouts)) %>%
+  filter(n>5)
+
+subs_raw <- rbind(subs_1,subs_2)
+
+write.csv(subs_raw, "/Users/thomasmatthews/ALY 6070/data/all_subs_raw_subjects.csv")
+```
+
+
+
+Sorting by the greatest increase, we can see that many of the most common genre's increased quite a bit, which likely comes from the overall increase in free-time people might devote to reading during the isolation, although there is no data to support this. When sorting by the most statistically significant increase, the top 5 subjects are Juvenile literature, Juvenile fiction, Humor (fiction), Romance, and Historical Fiction. It is also worth remembering that this data represents only 2% of the entire data set, and so there is not necessarily a guarantee the sampling preserved subject distribution perfectly, however, since there are several hundred thousand data points, it is likely fairly close. 
+
+We can also separate our subjects into their own data frame (for both sets) too look at them more in detail, which is done in the code below. This is mostly for investigative purposes. 
+
+```{r}
+month_Subjects <- as.data.frame(mdf$Subjects)
+names(month_Subjects) <- "subject"
+
+# Separate column values by comma into several columns
+# Crazily enough, the longest subject entry in the monthly data has 40 different entries!
+month_Subjects <- month_Subjects %>%
+  separate(subject,
+           into = c("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","aa","ab","ac","ad","ae","af","ag","ah","ai","aj","ak","al","am","ao"),",")
+
+# Combine columns into a single list
+month_Subjects <- data.frame(subject = c(t(month_Subjects)), stringsAsFactors=FALSE)
+month_Subjects <- trimws(month_Subjects$subject)
+month_Subjects <- data.frame(unique(month_Subjects))
+names(month_Subjects) <- "subject"
+```
+
+```{r}
+daily_Subjects <- as.data.frame(ddf$Subjects)
+names(daily_Subjects) <- "subject"
+
+# Separate column values by comma into several columns
+# Crazily enough, the longest subject entry in the monthly data has 46 different entries!
+daily_Subjects <- daily_Subjects %>%
+  separate(subject,
+           into = c("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","aa","ab","ac","ad","ae","af","ag","ah","ai","aj","ak","al","am","ao","ap","aq","ar","as","at","au"),",")
+
+# Combine columns into a single list
+daily_Subjects <- data.frame(subject = c(t(daily_Subjects)), stringsAsFactors=FALSE)
+daily_Subjects <- trimws(daily_Subjects$subject)
+daily_Subjects <- data.frame(unique(daily_Subjects))
+names(daily_Subjects) <- "subject"
+
+
+total_Subjects <- rbind(daily_Subjects,month_Subjects)
+```
+
+We can also filter some specific subjects to see if the social trends that were popular during the pandemic carry over in terms of book checkouts. For this analysis, we will use the monthly data set only, since the data is both physical and digital, there is more data throughout the entire interval of the isolation period. In the daily data, there is a few months missing before physical checkouts resumed. 
+
+
+
+```{r}
+cooking_filter <- "food|Food|Cooking|cooking|nutrition|Nutrition|cuisine|Cuisine|Cocktails|cocktails|recipe|Recipe|bread|Bread"
+plants_filter <- "grow|Grow|plant|Plant|tree|Tree|natural|Natural|Climate|climate|Soil|soil|Garden|garden|flower|Flower"
+romance_filter <- "romance|Romance|love|Love|dating|Dating|couple|Couple|marriage|Marriage"
+```
+
+
+
+```{r}
+cooking_df <- filter(mdf, grepl(cooking_filter, Subjects))
+plants_df <- filter(mdf, grepl(plants_filter, Subjects))
+romance_df <- filter(mdf, grepl(romance_filter, Subjects))
+
+plants_df %>% 
+  group_by(CheckoutMonth, CheckoutYear) %>% 
+  arrange(CheckoutYear, CheckoutMonth)
+
+
+write.csv(cooking_df, "/Users/thomasmatthews/ALY 6070/data/cooking.csv")
+write.csv(plants_df, "/Users/thomasmatthews/ALY 6070/data/plants.csv")
+write.csv(romance_df, "/Users/thomasmatthews/ALY 6070/data/romance.csv")
+write.csv(mdf, "/Users/thomasmatthews/ALY 6070/data/monthly.csv")
+```
+
+## Distributions 
+
+To get something of a sense of the distribution of the data, we can look at a number of plots which might give some insight, the first of which is below. 
+
+$$\underline{\text{Figure 3}}$$
+
+```{r fig.cap={"Distibution of Total Checkouts per Month"}}
+gg1 <- mdf %>% 
+  group_by(CheckoutMonth, CheckoutYear) %>%
+  summarise(Checkouts = sum(Checkouts)) %>% 
+  arrange(CheckoutYear, CheckoutMonth) %>% 
+  transmute(Date = as.yearmon(paste(CheckoutYear, CheckoutMonth), "%Y %m"), Checkouts = Checkouts) %>%
+  mutate(COVID_ID = +(!(Date < as.yearmon(paste(2020,3),"%Y %m"))), Source = rep("Monthly"))
+
+gg2 <- ddf %>% 
+  group_by(CheckoutMonth, CheckoutYear) %>%
+  summarise(Checkouts = n()) %>%
+  arrange(CheckoutYear, CheckoutMonth) %>% 
+  transmute(Date = as.yearmon(paste(CheckoutYear, CheckoutMonth), "%Y %m"), Checkouts = Checkouts) %>%
+  mutate(COVID_ID = +(!(Date < as.yearmon(paste(2020,3),"%Y %m"))), Source = rep("Daily"))
+
+gg3 <- rbind(gg1,gg2)
+
+
+ggplot(data = gg3) + geom_col(aes(x = Date, y = Checkouts, fill = as.factor(COVID_ID), alpha = Source)) + 
+  scale_alpha_discrete(guide = NULL, range = c(0.5,1)) + scale_fill_brewer(palette = "Set2",labels = c("Before","During")) + labs(title = "Total Checkouts per Month", fill='COVID', caption = "The transparent bars are checkouts from the daily data, and the opaque from the monthly.")
+```
+The checkouts definitely take a large drop immediately after March of 2020, especially in the daily data set (the more transparent bars above). This is because the daily set only considers physical checkouts, whereas the monthly data considers digital and physical which is shown in the usage class variable. 
+
+```{r}
+gg3 <- mdf %>% 
+  arrange(CheckoutYear, CheckoutMonth) %>% 
+  transmute(Date = as.yearmon(paste(CheckoutYear, CheckoutMonth), "%Y %m"), Checkouts = sum(Checkouts), UsageClass = UsageClass) %>% 
+  ggplot() + geom_col(aes(x = Date, y = Checkouts, fill = UsageClass)) + scale_fill_manual(values = c("grey","grey60"))
+
+gg3
+```
+
+Overall, we can see that the digital checkouts continue at after the initial shutdown due to COVID, and after a few months the physical checkouts begin to pick up when drive by pickup and similar processes where more widely established. Overall, the data set is about 42% digital, and 58% physical checkouts. This validates that while digital media are becoming much more popular, this data can speak to publishers about the popular subjects of physical media. This is also shown in figure 4. 
+
+```{r}
+mdf %>%
+  group_by(CheckoutMonth, CheckoutYear, MaterialType) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count)) %>%
+  mutate(Frequency = round(Count / sum(Count),2)) %>%
+  mutate(Cumulative_Frequency = round(cumsum(Count)/nrow(mdf),2)) %>%
+  mutate(Date = as.yearmon(paste(CheckoutYear, CheckoutMonth), "%Y %m")) %>%
+  ggplot() + geom_line(aes(x = Date, y = Frequency, color = MaterialType))
+```
+
+# References
+
+Bibliography of libraries. 
+
+```{r}
+write_bib()
+```
+
+
+
+
